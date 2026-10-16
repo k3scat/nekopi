@@ -19,7 +19,7 @@ Use `/reload` after changing settings. Reload cancels unfinished image jobs.
 | `nekocli.enabled` | `true` | Source operations through `nek`; the agent gets `bash` instead of separate source tools |
 | `languageServers.enabled` | `true` | Allow an installed language server or project compiler to start when needed |
 | `languageServers.servers` | — | Server recipe overrides; see below |
-| `diagnostics.enabled` | `false` | Before/after file diagnostics on native edit and write tools |
+| `diagnostics.enabled` | `false` | Before/after file diagnostics on native edit and write tools in trusted projects |
 | `web.enabled` | `false` | Enable `nek web` using the selected coding model's credential |
 | `image.enabled` | `false` | Enable background `nek image` jobs using a Codex subscription login |
 | `telemetry.enabled` | `false` | Write local metadata logs for cross-run statistics |
@@ -78,6 +78,13 @@ untrusted retrieved content, not instructions.
 Normal `nek` search and reading use ripgrep and tree-sitter, not a language server.
 `nekopi lsp` reports detection; it does not start a semantic query. Servers are
 started on demand for diagnostics. NekoPi does not install them during a task.
+
+Automatic diagnostics require a trusted project, even when enabled in user
+settings. Otherwise native edits and writes continue without starting a server
+or loading the project's TypeScript compiler. Trust the project and reload to
+enable diagnostics. Revoking trust stops diagnostics at the next use and closes
+the existing semantic layer. Server detection with `nekopi lsp` does not execute
+servers and remains available in untrusted projects.
 
 Discovery checks `PATH`, ancestor project binaries and common user locations.
 Built-in recipes cover TypeScript/TSX/JavaScript, Python, Go, Rust, C/C++, Java

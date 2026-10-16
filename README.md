@@ -41,6 +41,9 @@ Install Git and `rg` separately. To run from source:
 Use Bun **1.2.18** to install and build, Node **22.19+** to launch, and an
 installed `rg` for search. The development dependencies pin Pi **1.3.0**.
 
+Maintainers can run the pinned Pi directly with `sh scripts/pi-dev`. The checkout's
+`bin` directory does not replace an existing `pi` command.
+
 ```sh
 bun install --frozen-lockfile --ignore-scripts
 bun run build

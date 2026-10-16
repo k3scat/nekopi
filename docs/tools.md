@@ -5,16 +5,26 @@ The default agent-facing tool is Pi's native `bash`. `nek` runs inside it;
 `nek --help` lists the accepted commands. Hosted commands need their settings
 [enabled](configuration.md#settings) and a live NekoPi session.
 
+Source commands accept `--` to end option parsing. Arguments after it are positional
+patterns or paths, even when they start with a dash: `nek read -- -odd-name.ts`.
+
 ## grep
 
 ```sh
 nek grep 'parse|decode' src tests --glob '*.ts' --context 2
 nek grep 'items[0]' src -F --files
+nek grep -e '--frozen' README.md
+nek grep -- '--files' README.md
 ```
 
 A regex by default; `-F` / `--fixed` searches literal text. `-i` /
 `--ignore-case` ignores case. Hits show `path:line` and, when available, their
 enclosing declaration. Context rows use `-` instead of `:` after the line number.
+
+`-e PATTERN` / `--regexp PATTERN` selects one pattern explicitly. Its value can
+start with a dash or be `--` itself. Combine alternatives with `a|b` rather than
+repeating `-e`. Unknown options are rejected. Options can appear before or after
+paths, but not after the `--` marker.
 
 `--files` returns paths only. Repeat `--glob` / `-g` for ordered rules;
 `!pattern` excludes, and a later rule wins. Traversal follows ripgrep's ignore

@@ -28,7 +28,7 @@ async function runBuild(args: string[]): Promise<void> {
     if (!result.success) throw new AggregateError(result.logs, "NekoPi build failed.");
     artifacts += result.outputs.length;
   }
-  console.log(`Built ${artifacts} artifacts in dist/.`);
+  console.error(`Built ${artifacts} artifacts in dist/.`);
 }
 
 if (import.meta.main) await runBuild(process.argv.slice(2));

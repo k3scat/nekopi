@@ -1,7 +1,22 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+test("checkout launchers do not shadow an existing Pi installation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "nekopi-path-"));
+  try {
+    const pi = join(root, "pi");
+    await writeFile(pi, "#!/bin/sh\nprintf 'external Pi\\n'\n");
+    await chmod(pi, 0o755);
+    const bin = new URL("../bin", import.meta.url).pathname;
+    const child = Bun.spawn(["sh", "-c", "command -v pi"], {
+      env: { ...process.env, PATH: `${bin}:${root}:${process.env.PATH ?? ""}` }, stdout: "pipe", stderr: "pipe",
+    });
+    expect(await new Response(child.stdout).text()).toBe(`${pi}\n`);
+    expect(await child.exited).toBe(0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("importing the user CLI does not start a session or execute argv", async () => {
   const child = Bun.spawn([process.execPath, "--eval", `

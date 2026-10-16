@@ -32,7 +32,7 @@ interface SessionState {
   askBridgeActive: boolean;
   imageJobs: ImageJobs;
   lsp?: SemanticLayer;
-  /** Languages already reported to the user as having no server. */
+  /** One-time user notices and missing-server languages. */
   noticed: Set<string>;
   /** Whether the user has been told that diagnostics needs the other shape. */
   noticedDiagnostics?: boolean;
@@ -155,8 +155,20 @@ export function createNekopiExtension(options: { agentDir?: string;
         ctx.ui.notify("nekopi: diagnostics.enabled attaches to the native edit and write"
           + " tools. Set nekocli.enabled to false to register them.", "warning");
       }
-      const wantsLayer = current.loaded.config.languageServers.enabled
+      const wantsDiagnostics = current.loaded.config.languageServers.enabled
         && current.loaded.config.diagnostics.enabled && !shell;
+      const noticeUntrusted = () => {
+        if (!ctx.hasUI || current.noticed.has("diagnostics:untrusted")) return;
+        current.noticed.add("diagnostics:untrusted");
+        ctx.ui.notify("nekopi: automatic diagnostics are disabled for untrusted projects."
+          + " Trust this project and reload to enable them.", "warning");
+      };
+      const wantsLayer = wantsDiagnostics && ctx.isProjectTrusted();
+      if (wantsDiagnostics && !wantsLayer) noticeUntrusted();
+      if (!wantsLayer && current.lsp) {
+        await current.lsp.dispose();
+        current.lsp = undefined;
+      }
       if (wantsLayer && !current.lsp) {
         current.lsp = createSemanticLayer(ctx.cwd,
           current.loaded.config.languageServers.servers ? { servers: current.loaded.config.languageServers.servers } : {});
@@ -164,7 +176,18 @@ export function createNekopiExtension(options: { agentDir?: string;
 
       // Register native wrappers after their diagnostics provider is ready.
       if (!shell) {
-        const diagnose = wantsLayer ? current.lsp?.diagnose : undefined;
+        const diagnose = wantsLayer ? async (file: string, signal?: AbortSignal) => {
+          // Recheck at use, not just discovery: trust can be revoked before reload.
+          if (state !== current) return undefined;
+          if (!ctx.isProjectTrusted()) {
+            noticeUntrusted();
+            const layer = current.lsp;
+            current.lsp = undefined;
+            await layer?.dispose();
+            return undefined;
+          }
+          return current.lsp?.diagnose(file, signal);
+        } : undefined;
         const mutations = diagnose
           ? (await import("./tools/edit/diagnostics.ts")).createDiagnosticMutationTools(ctx.cwd, diagnose)
           : [createEditRecoveryTool(ctx.cwd)];

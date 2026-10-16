@@ -1,8 +1,25 @@
 import { expect, test } from "bun:test";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { posix } from "node:path";
 import { promisify } from "node:util";
+
+test("prepare keeps npm pack JSON clean even when lifecycle scripts run", async () => {
+  const root = await mkdtemp(join(tmpdir(), "nekopi-pack-json-"));
+  try {
+    await mkdir(join(root, "scripts"));
+    await mkdir(join(root, "src"));
+    await copyFile(new URL("../scripts/build.ts", import.meta.url), join(root, "scripts/build.ts"));
+    for (const name of ["cli", "index", "nekocli"]) await writeFile(join(root, `src/${name}.ts`), "export const ready = true;\n");
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "nekopi-pack-fixture", version: "1.0.0", type: "module",
+      scripts: { prepare: "bun scripts/build.ts" } }));
+    const { stdout, stderr } = await promisify(execFile)("npm", ["pack", "--json", "--ignore-scripts=false"], { cwd: root, timeout: 15000 });
+    expect(JSON.parse(stdout)[0].name).toBe("nekopi-pack-fixture");
+    expect(stderr).toContain("Built");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("the npm archive includes built launchers and excludes development and local data", async () => {
   const cwd = new URL("..", import.meta.url).pathname;
