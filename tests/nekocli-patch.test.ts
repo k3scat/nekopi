@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { runNekocli } from "../src/nekocli.ts";
 
 const patch = (cwd: string, text: string, check = false) =>
@@ -72,6 +72,31 @@ test("malformed raw diffs name their syntax mistake without changing successful 
     expect(applied.text).toBe("Patched 1 file(s):\nsource.txt");
     expect(await readFile(join(cwd, "source.txt"), "utf8")).toBe("new\n");
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("raw diff recovery recognizes Git errors with a filename and line number", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "nekocli-patch-format-"));
+  const previousPath = process.env.PATH;
+  try {
+    const bin = join(cwd, "bin");
+    await mkdir(bin);
+    await writeFile(join(bin, "git"), "#!/bin/sh\nprintf '%s\\n' 'error: corrupt patch at /tmp/input.diff:6' >&2\nexit 128\n");
+    await chmod(join(bin, "git"), 0o755);
+    await writeFile(join(cwd, "source.txt"), "old\n");
+    process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
+    const diff = "--- a/source.txt\n+++ b/source.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n*** End Patch\n";
+    for (const check of [false, true]) {
+      const result = await patch(cwd, diff, check);
+      expect(result.failed).toBe(true);
+      expect(result.text).toContain("corrupt patch at /tmp/input.diff:6");
+      expect(result.text).toContain("Remove *** End Patch from a unified diff");
+    }
+    expect(await readFile(join(cwd, "source.txt"), "utf8")).toBe("old\n");
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("a conflicting three-way retry leaves the working tree unchanged", async () => {

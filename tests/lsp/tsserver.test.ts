@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -10,6 +10,7 @@ import { createTsserverTool as createProjectTsserverTool, type TsserverOptions }
 const createTsserverTool = (cwd: string, options: TsserverOptions = {}) =>
   createProjectTsserverTool(cwd, { allowHarnessFallback: true, ...options });
 import { source } from "../../src/tools/typescript/source.ts";
+import { TsserverOwner } from "../../src/tools/typescript/session.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -216,7 +217,15 @@ createInterface({input:process.stdin}).on('line',line=>{
     expect(JSON.stringify(uncertain)).not.toContain("stderr-private-source");
     const malformedServer = validServer.replace("+text);", "+text+(q.command==='definition'?'bad-header\\r\\n\\r\\n':''));");
     await writeFile(join(root, "lib/tsserver.js"), malformedServer);
-    await expect(query(root, { action: "definition", file: "src/main.ts", line: 1, column: 14 }, { serverPath: join(root, "lib/tsserver.js"), onSpawn: value => pid = value })).rejects.toThrow("Invalid tsserver protocol");
+    // Keep cleanup pending long enough to expose unhandled validation rejections.
+    const reset = TsserverOwner.prototype.reset;
+    const delayedReset = spyOn(TsserverOwner.prototype, "reset").mockImplementation(async function (this: TsserverOwner) {
+      await Bun.sleep(50);
+      return reset.call(this);
+    });
+    try {
+      await expect(query(root, { action: "definition", file: "src/main.ts", line: 1, column: 14 }, { serverPath: join(root, "lib/tsserver.js"), onSpawn: value => pid = value })).rejects.toThrow("Invalid tsserver protocol");
+    } finally { delayedReset.mockRestore(); }
     gone(pid);
     for (const version of ["4.8.4", "7.0.0", "5.9.3-dev.1"]) {
       await writeFile(join(root, "package.json"), JSON.stringify({ name: "typescript", version, type: "module" }));

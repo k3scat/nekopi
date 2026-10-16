@@ -79,10 +79,12 @@ values:
 | Workflow filename | `check.yml` |
 | Environment | `npm` |
 
-Alternatively, register it from an interactive terminal with npm's CLI:
+Alternatively, register it from an interactive terminal with npm 11.15.0 or
+newer. The command below uses a current npm 11 client without changing the
+global installation and explicitly permits publishing:
 
 ```sh
-npm trust github nekopi --file check.yml --repository k3scat/nekopi --environment npm --yes
+npx --yes npm@11 trust github nekopi --file check.yml --repository k3scat/nekopi --environment npm --allow-publish --yes
 ```
 
 Publishing and trusted-publisher changes can require a new browser or two-factor

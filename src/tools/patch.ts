@@ -12,7 +12,7 @@ interface PatchResult { text: string; failed?: boolean }
 
 /** Explain the two raw diff syntax mistakes seen in saved failed calls. */
 function rawPatchFailure(diff: string, message: string): string {
-  if (!/No valid patches in input|corrupt patch at line/u.test(message)
+  if (!/No valid patches in input|corrupt patch at /u.test(message)
     || !/^--- .+/mu.test(diff) || !/^\+\+\+ .+/mu.test(diff)) return message;
   const notes: string[] = [];
   if (/^@@[ \t\r]*$/mu.test(diff)) {

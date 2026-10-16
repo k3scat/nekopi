@@ -217,7 +217,8 @@ export function createTsserverTool(cwd: string, options: TsserverOptions = {}): 
       while (results.length && Buffer.byteLength(output()) > maxOutputBytes) results.pop();
       const text = output();
       if (Buffer.byteLength(text) > maxOutputBytes) throw new Error("Project metadata exceeds output limit.");
-      return finish(text);
+      // Observe validation failures before asynchronous cleanup delays promise adoption.
+      return await finish(text);
     } finally {
       if (!persistent) await owner.reset();
     }
