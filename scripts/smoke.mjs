@@ -61,6 +61,9 @@ export async function runSmoke(args) {
     const help = await run(["--help"]);
     assert.equal(help.stdout.split("Pi commands and options follow:").length - 1, 1);
     assert.match(help.stdout, /--model/);
+    assert.match(help.stdout, /nekopi update/);
+    const updateHelp = await run(["update", "--help"]);
+    assert.match(updateHelp.stdout, /nekopi@latest/);
 
     // Derive command coverage from the built CLI, not a second command list.
     const declared = (await runNekocli(["--help"])).text
