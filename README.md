@@ -97,6 +97,22 @@ catalog updates remain available with `nekopi update --extensions`,
 `nekopi update --extension SOURCE`, and `nekopi update --models`.
 Use `nekopi update --help` for details. Updates never run automatically.
 
+## Personality
+
+Create `~/.pi/agent/PERSONA.md` to replace the default opening identity without
+replacing tool or workflow guidance. For example:
+
+```markdown
+You are Neko, a calm ship engineer with dry humor.
+Speak in character. Keep technical explanations and tool results accurate.
+```
+
+In trusted projects, the nearest `PERSONA.md` in the working directory or its
+ancestors overrides the global file. Use `/reload` after changes and
+`/nekopi prompt` to view the opening text. No CLI flag or JSON setting is needed.
+See [personality configuration](docs/configuration.md#personality) for precedence
+and file limits.
+
 ## What's here
 
 - `nek grep`, `find`, `read`, `patch`, `edit`, `write`: source work through the shell.
