@@ -31,7 +31,8 @@ See [Releases](releases.md) for commit conventions and publishing setup.
 
 | Location | Responsibility |
 | --- | --- |
-| [src/cli.ts](../src/cli.ts), [bin/](../bin/) | Launcher, local commands, Pi option passthrough |
+| [src/cli.ts](../src/cli.ts), [update.ts](../src/update.ts), [bin/](../bin/) | Launcher and explicit npm self-updates without loading Pi |
+| [src/cli-main.ts](../src/cli-main.ts) | Local commands and Pi option passthrough |
 | [src/index.ts](../src/index.ts) | Lifecycle, tool selection, prompt sections, session commands |
 | [src/branding.ts](../src/branding.ts) | Standalone TUI header through Pi's public UI API |
 | [src/config.ts](../src/config.ts) | Strict NekoPi settings, trust and value origins |

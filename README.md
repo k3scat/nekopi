@@ -74,6 +74,29 @@ pi -e /absolute/path/to/nekopi
 
 Do not load two copies of the extension. This mode keeps Pi's own header.
 
+## Updates
+
+For a global npm installation:
+
+```sh
+nekopi update
+```
+
+This runs `npm install --global nekopi@latest` with the npm beside the running
+Node installation, after checking that it owns this copy of NekoPi. It does not
+update a separate Pi installation or change NekoPi settings, credentials, or
+sessions. npm manages compatible dependencies. Start a new session afterward.
+
+Source checkouts, linked packages, and other installation types receive manual
+instructions instead. For source checkouts, pull the desired changes, then run
+`bun install --frozen-lockfile --ignore-scripts && bun run build`. For other
+installations, use the original package manager.
+
+NekoPi replaces Pi's default self-update command. Explicit extension and model
+catalog updates remain available with `nekopi update --extensions`,
+`nekopi update --extension SOURCE`, and `nekopi update --models`.
+Use `nekopi update --help` for details. Updates never run automatically.
+
 ## What's here
 
 - `nek grep`, `find`, `read`, `patch`, `edit`, `write`: source work through the shell.

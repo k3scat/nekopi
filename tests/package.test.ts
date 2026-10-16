@@ -12,7 +12,7 @@ test("prepare keeps npm pack JSON clean even when lifecycle scripts run", async 
     await mkdir(join(root, "scripts"));
     await mkdir(join(root, "src"));
     await copyFile(new URL("../scripts/build.ts", import.meta.url), join(root, "scripts/build.ts"));
-    for (const name of ["cli", "index", "nekocli"]) await writeFile(join(root, `src/${name}.ts`), "export const ready = true;\n");
+    for (const name of ["cli", "cli-main", "index", "nekocli"]) await writeFile(join(root, `src/${name}.ts`), "export const ready = true;\n");
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "nekopi-pack-fixture", version: "1.0.0", type: "module",
       scripts: { prepare: "bun scripts/build.ts" } }));
     const { stdout, stderr } = await promisify(execFile)("npm", ["pack", "--json", "--ignore-scripts=false"], { cwd: root, timeout: 15000 });
@@ -28,7 +28,7 @@ test("the npm archive includes built launchers and excludes development and loca
   const [archive] = JSON.parse(stdout) as Array<{ files: Array<{ path: string; mode: number }> }>;
   const paths = archive!.files.map(file => file.path);
   for (const path of ["LICENSE", "README.md", "package.json", "bin/nek", "bin/nekocli",
-    "bin/nekopi.mjs", "bin/nekocli.mjs", "dist/cli.js", "dist/index.js", "dist/nekocli.js", "src/index.ts"]) {
+    "bin/nekopi.mjs", "bin/nekocli.mjs", "dist/cli.js", "dist/cli-main.js", "dist/index.js", "dist/nekocli.js", "src/index.ts"]) {
     expect(paths).toContain(path);
   }
   expect(paths.some(path => /^(?:\.git|\.github|\.nekopi|\.pi|node_modules|bench|tests)\//u.test(path))).toBe(false);
