@@ -56,7 +56,7 @@ jobs:
       - name: Ensure ripgrep is installed
         run: command -v rg || (sudo apt-get update && sudo apt-get install --yes ripgrep)
       - run: bun install --ignore-scripts
-      - run: bun add -d @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest
+      - run: bun add -d --exact @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest
       - run: bun run check
 
   release:
