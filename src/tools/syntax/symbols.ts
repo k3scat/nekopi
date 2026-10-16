@@ -103,15 +103,28 @@ function nameOf(node: Node, rules: LanguageRules): { text: string; at: Node } | 
  * symbol of its own but does not hide what it wraps.
  */
 export function outlineOf(root: Node, rules: LanguageRules,
-  options: { includeMembers?: boolean } = {}): { symbols: Symbol[]; truncated: boolean } {
+  options: { includeMembers?: boolean; lines?: readonly number[] } = {}): { symbols: Symbol[]; truncated: boolean } {
   const symbols: Symbol[] = [];
   let count = 0;
   let truncated = false;
+  const lines = options.lines && [...new Set(options.lines)].sort((a, b) => a - b);
+  const intersects = (start: number, end: number): boolean => {
+    if (!lines) return true;
+    let low = 0, high = lines.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (lines[middle]! < start) low = middle + 1;
+      else high = middle;
+    }
+    return low < lines.length && lines[low]! <= end;
+  };
 
   function visit(node: Node, into: Symbol[], depth: number, inCallable: boolean, nested: boolean): void {
     if (truncated || depth > 24) return;
     for (const child of node.namedChildren) {
       if (!child) continue;
+      // Search needs owners of matching lines, not declarations in unrelated subtrees.
+      if (lines && !intersects(child.startPosition.row + 1, child.endPosition.row + 1)) continue;
       if (count >= MAX_SYMBOLS) { truncated = true; return; }
       const kind = kindOf(child, rules);
       // A local inside a function body is never an outline symbol. includeMembers

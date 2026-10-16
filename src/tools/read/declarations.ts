@@ -1,4 +1,4 @@
-import { createSearchTool, type FileSearchDetails } from "../search.ts";
+import { search, type FileSearchDetails } from "../search/core.ts";
 import { resolveInside } from "../workspace-path.ts";
 import { symbolRanges } from "./symbol-range.ts";
 
@@ -32,9 +32,9 @@ export async function declarationsOf(cwd: string, name: string, signal?: AbortSi
   if (!/^[A-Za-z_$][\w$]*$/u.test(name)) return { ...empty, incomplete: "The workspace lookup needs one identifier.", failed: true };
   let seen: string[], capped = false, incomplete: string | undefined, failed = false;
   try {
-    const result = await createSearchTool(cwd).execute("nekocli",
+    const result = await search(cwd,
       { pattern: `\\b${name}\\b`, outputMode: "files", limit: CANDIDATES } as never,
-      signal ?? AbortSignal.timeout(TIMEOUT_MS), () => {}, { cwd } as never);
+      {}, signal ?? AbortSignal.timeout(TIMEOUT_MS));
     const details = result.details as FileSearchDetails;
     seen = details.files;
     capped = details.resultOverflow || details.outputTruncated;

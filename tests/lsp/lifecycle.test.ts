@@ -12,8 +12,11 @@ test("the semantic layer closes its compiler on reload and session shutdown", as
   // re-read the user config on reload, and this test is about the compiler's
   // lifetime rather than package loading, which `integration.test.ts` covers.
   const fixture = await createSdkFixture({
+    trusted: true,
     sixTools: true,
-    globalConfig: { languageServers: { enabled: true }, diagnostics: { enabled: true } } });
+    globalConfig: { languageServers: { enabled: true,
+      servers: { typescript: { command: join(import.meta.dir, "missing-lifecycle-language-server") } } },
+      diagnostics: { enabled: true } } });
   const require = createRequire(import.meta.url);
   const pidFile = join(fixture.cwd, "compiler.pid");
   let pid: number | undefined;
@@ -46,6 +49,12 @@ test("the semantic layer closes its compiler on reload and session shutdown", as
     const previous = pid;
     pid = await query();
     expect(pid).not.toBe(previous);
+    fixture.session.settingsManager.setProjectTrusted(false);
+    await query();
+    expect(() => process.kill(pid!, 0)).toThrow();
+    fixture.session.settingsManager.setProjectTrusted(true);
+    await fixture.session.reload();
+    pid = await query();
     await fixture.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     expect(() => process.kill(pid!, 0)).toThrow();
     expect(fixture.errors).toEqual([]);

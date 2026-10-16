@@ -24,7 +24,8 @@ async function typescriptProject(files: Record<string, string>): Promise<string>
 }
 
 async function withLayer<T>(cwd: string, body: (layer: ReturnType<typeof createSemanticLayer>) => Promise<T>): Promise<T> {
-  const layer = createSemanticLayer(cwd);
+  // These tests exercise the compiler fallback, regardless of host-installed servers.
+  const layer = createSemanticLayer(cwd, { resolve: async () => undefined });
   try { return await body(layer); } finally {
     await layer.dispose();
     await rm(cwd, { recursive: true, force: true });

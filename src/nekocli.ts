@@ -2,17 +2,16 @@
 import { constants } from "node:fs";
 import { access, writeFile, mkdir, readFile, realpath, stat, lstat, open } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { COMMAND_NAMES, usage } from "./tools/commands.ts";
+import { COMMANDS, COMMAND_NAMES, usage } from "./tools/commands.ts";
 import { askMarker, MAX_ASK_BYTES } from "./tools/bash/ask-bridge.ts";
 import { MAX_QUERY_BYTES } from "./tools/web.ts";
 import { IMAGE_HELP, MAX_INPUTS, MAX_PROMPT_BYTES } from "./tools/image.ts";
 import { applyPatch } from "./tools/patch.ts";
-import { createEditRecoveryTool } from "./tools/edit.ts";
-import { createFindTool } from "./tools/find.ts";
-import { createReadBufferTool, readSelection } from "./tools/read.ts";
-import { createSearchTool, SEARCH_PATH_LIMIT } from "./tools/search.ts";
+import { findFiles } from "./tools/find/core.ts";
+import { search, SEARCH_PATH_LIMIT } from "./tools/search/core.ts";
 import { declarationsOf, describeDeclarations } from "./tools/read/declarations.ts";
-import { cliRangeLimits, cliReadText } from "./tools/read/cli-output.ts";
+import { cliRangeLimits } from "./tools/read/cli-budget.ts";
+import { cliText as cliReadText, readSmallText, readTextSelection } from "./tools/read/cli-text.ts";
 import { imageReadMarker } from "./tools/bash/image-bridge.ts";
 import { inside, resolveInside } from "./tools/workspace-path.ts";
 
@@ -25,36 +24,43 @@ const USAGE = usage();
 
 interface Result { text: string; failed?: boolean }
 
-/** Flags are pulled out of argv so the positional arguments stay positional. */
-function flags(argv: string[]) {
+/** Parse once, preserving option values and everything after the end marker. */
+function flags(argv: string[], command: string) {
+  const definition = COMMANDS.find(one => one.name === command);
+  const options: Array<{ flag: string; value?: string }> = [];
+
+  // Web takes unparsed query text, not command options.
+  if (definition && command !== "web") {
+    let kept = 0;
+    for (let index = 0; index < argv.length; index++) {
+      const argument = argv[index]!;
+      if (argument === "--") {
+        while (++index < argv.length) argv[kept++] = argv[index]!;
+        break;
+      }
+      if (argument === "-" || !argument.startsWith("-")) { argv[kept++] = argument; continue; }
+      if (!definition.flags?.includes(argument)) {
+        const hint = command === "grep" ? "Use -e PATTERN or -- for a pattern that starts with \"-\"."
+          : "Use -- before paths or text that start with \"-\".";
+        throw new Error(`${command}: ${command === "grep" ? "unknown option" : "unexpected argument"} ${JSON.stringify(argument)}. ${hint}`);
+      }
+      if (definition.valueFlags?.includes(argument)) {
+        const value = argv[++index];
+        if (value === undefined) throw new Error(`${argument} needs a value`);
+        options.push({ flag: argument, value });
+      } else options.push({ flag: argument });
+    }
+    argv.length = kept;
+  }
+  const values = (name: string, short?: string): string[] => options
+    .filter(option => option.flag === `--${name}` || option.flag === short).map(option => option.value!);
   const value = (name: string): string | undefined => {
-    const at = argv.indexOf(`--${name}`);
-    if (at === -1) return undefined;
-    const found = argv[at + 1];
-    if (found === undefined) throw new Error(`--${name} needs a value`);
-    argv.splice(at, 2);
-    return found;
+    const found = values(name);
+    if (found.length > 1) throw new Error(`--${name} takes one value`);
+    return found[0];
   };
-  /** Consume repeated flags in command-line order. */
-  const values = (name: string, short?: string): string[] => {
-    const found: string[] = [];
-    for (let at = 0; at < argv.length;) {
-      const flag = argv[at];
-      if (flag !== `--${name}` && flag !== short) { at++; continue; }
-      const one = argv[at + 1];
-      if (one === undefined) throw new Error(`${flag} needs a value`);
-      found.push(one);
-      argv.splice(at, 2);
-    }
-    return found;
-  };
-  const present = (...names: string[]): boolean => {
-    for (const name of names) {
-      const at = argv.indexOf(name.length === 1 ? `-${name}` : `--${name}`);
-      if (at !== -1) { argv.splice(at, 1); return true; }
-    }
-    return false;
-  };
+  const present = (...names: string[]): boolean => names.some(name =>
+    options.some(option => option.flag === (name.length === 1 ? `-${name}` : `--${name}`)));
   const count = (name: string): number | undefined => {
     const text = value(name);
     if (text === undefined) return undefined;
@@ -66,7 +72,7 @@ function flags(argv: string[]) {
 }
 
 function positionals(command: string, argv: string[], maximum: number): void {
-  const unexpected = argv.find((argument, index) => index >= maximum || argument.startsWith("-"));
+  const unexpected = argv[maximum];
   if (unexpected !== undefined) throw new Error(`${command}: unexpected argument ${JSON.stringify(unexpected)}`);
 }
 
@@ -112,8 +118,7 @@ async function nearestPaths(cwd: string, path: string): Promise<string[]> {
   const name = path.split("/").filter(Boolean).pop();
   if (!name) return [];
   try {
-    const found = textOf(await createFindTool(cwd).execute("nekocli",
-      { pattern: name, limit: 4 } as never, AbortSignal.timeout(REDIRECT_MS), () => {}, { cwd } as never));
+    const found = textOf(await findFiles(cwd, { pattern: name, limit: 4 }, {}, AbortSignal.timeout(REDIRECT_MS)));
     return found.split("\n").map(line => line.trim()).filter(line => line && !line.startsWith("No "));
   } catch { return []; }
 }
@@ -141,13 +146,15 @@ async function dispatch(argv: string[], cwd: string,
   const rest = [...argv];
   const command = rest.shift();
   if (!command || command === "--help" || command === "-h" || command === "help") return { text: USAGE };
-  const { value, values, present, count } = flags(rest);
+  const { value, values, present, count } = flags(rest, command);
 
   if (command === "grep") {
     const globs = values("glob", "-g"), context = count("context"), limit = count("limit");
     const files = present("files"), ignoreCase = present("i", "ignore-case");
     const fixed = present("F", "fixed");
-    const [pattern, ...paths] = rest;
+    const patterns = values("regexp", "-e");
+    if (patterns.length > 1) throw new Error("grep takes one pattern; combine alternatives as 'a|b'");
+    const [pattern, ...paths] = patterns.length ? [patterns[0]!, ...rest] : rest;
     if (!pattern) throw new Error("grep needs a pattern. nekocli --help");
     if (context !== undefined && context > 20) throw new Error("grep: --context accepts 0-20 lines");
     if (paths.length > SEARCH_PATH_LIMIT) {
@@ -167,8 +174,7 @@ async function dispatch(argv: string[], cwd: string,
     if (absent.length && !existing.length) throw new Error(missing);
     // Reserve space for the incomplete-scope notice without relaxing the
     // search tool's 50 KiB output cap.
-    const tool = createSearchTool(cwd, absent.length ? { maxOutputBytes: 49 * 1024 } : {});
-    const result = await tool.execute("nekocli", {
+    const result = await search(cwd, {
       pattern,
       ...(existing.length ? { path: existing.length === 1 ? existing[0] : existing } : {}),
       ...(globs.length ? { glob: globs.length === 1 ? globs[0]! : globs } : {}),
@@ -176,7 +182,7 @@ async function dispatch(argv: string[], cwd: string,
       ...(limit === undefined ? {} : { limit }),
       ...(files ? { outputMode: "files" as const } : {}), ...(ignoreCase ? { ignoreCase: true } : {}),
       ...(fixed ? { literal: true } : {}),
-    } as never, AbortSignal.timeout(TIMEOUT_MS), () => {}, { cwd } as never);
+    }, absent.length ? { maxOutputBytes: 49 * 1024 } : {}, AbortSignal.timeout(TIMEOUT_MS));
     let text = textOf(result).replace(
       /(^Incomplete: [^\n]*), or use outputMode: files\.$/mu,
       "$1, or use --files.");
@@ -203,9 +209,9 @@ async function dispatch(argv: string[], cwd: string,
       throw new Error(`no such path: ${gone[0]}.`
         + (near.length ? ` Did you mean ${near.slice(0, 4).join(", ")}?` : ""));
     }
-    const result = await createFindTool(cwd).execute("nekocli",
-      { pattern, ...(path ? { path } : {}), ...(limit === undefined ? {} : { limit }) } as never,
-      AbortSignal.timeout(TIMEOUT_MS), () => {}, { cwd } as never);
+    const result = await findFiles(cwd,
+      { pattern, ...(path ? { path } : {}), ...(limit === undefined ? {} : { limit }) },
+      {}, AbortSignal.timeout(TIMEOUT_MS));
     return result.isError ? { text: textOf(result), failed: true } : { text: textOf(result) };
   }
 
@@ -223,20 +229,32 @@ async function dispatch(argv: string[], cwd: string,
         ...(found.failed ? { failed: true } : {}) };
       const only = found.declared[0]!;
       const prefix = `${describeDeclarations(symbol, found)}\n\n`;
-      return { text: cliReadText(await readSelection(cwd, {}, cliRangeLimits(only.path, prefix))(
-        { path: only.path, symbol }, AbortSignal.timeout(TIMEOUT_MS), { cwd }), only.path, prefix) };
+      const input = { path: only.path, symbol };
+      const result = await readTextSelection(cwd, input, prefix)
+        ?? await (await import("./tools/read.ts")).readSelection(cwd, {}, cliRangeLimits(only.path, prefix))(
+          input, AbortSignal.timeout(TIMEOUT_MS), { cwd });
+      return { text: await cliReadText(result, only.path, prefix) };
     }
     if (!path) throw new Error("read needs a file, or --symbol with a name. nekocli --help");
     try {
       if (lines !== undefined || symbol !== undefined) {
-        return { text: cliReadText(await readSelection(cwd, {}, cliRangeLimits(path))({ path,
+        const input = { path,
           ...(symbol === undefined ? {} : { symbol }), ...(lines === undefined ? {} : { ranges: spans(lines) }),
-        }, AbortSignal.timeout(TIMEOUT_MS), { cwd }), path) };
+        };
+        const result = await readTextSelection(cwd, input)
+          ?? await (await import("./tools/read.ts")).readSelection(cwd, {}, cliRangeLimits(path))(
+            input, AbortSignal.timeout(TIMEOUT_MS), { cwd });
+        return { text: await cliReadText(result, path) };
       }
+      if (limit === undefined) {
+        const small = await readSmallText(cwd, path);
+        if (small) return { text: await cliReadText(small, path) };
+      }
+      const { createReadBufferTool } = await import("./tools/read.ts");
       const result = await createReadBufferTool(cwd).execute("nekocli",
         { path, lineNumbers: true, ...(limit === undefined ? {} : { limit }) } as never,
         AbortSignal.timeout(TIMEOUT_MS), () => {}, { cwd } as never);
-      const body = cliReadText(result, path);
+      const body = await cliReadText(result, path);
       const bridge = await imageReadMarker(result);
       return { text: [body, bridge.note, bridge.marker].filter(Boolean).join("\n") };
     } catch (error) {
@@ -280,6 +298,7 @@ async function dispatch(argv: string[], cwd: string,
       throw new Error("edit needs a workspace-relative path to a file inside the workspace");
     }
     const absolute = resolve(cwd, path);
+    const { createEditRecoveryTool } = await import("./tools/edit.ts");
     const tool = createEditRecoveryTool(cwd, {
       access(actual) {
         // Native edit expands @, ~ and Unicode spaces. Never validate one path
@@ -341,6 +360,7 @@ async function dispatch(argv: string[], cwd: string,
     const status = value("status"), cancel = value("cancel");
     if (status !== undefined || cancel !== undefined) {
       if (status !== undefined && cancel !== undefined) throw new Error("image: use --status or --cancel, not both.");
+      if (present("out", "from")) throw new Error("image: --status and --cancel do not accept --out or --from.");
       positionals("image", rest, 0);
       const id = (status ?? cancel)!;
       if (!/^image-[\w-]{1,80}$/u.test(id)) throw new Error("image: invalid job ID.");
@@ -349,8 +369,7 @@ async function dispatch(argv: string[], cwd: string,
         : { text: "image is off. Set image.enabled in nekopi.json and /reload.", failed: true };
     }
     const out = value("out"), from = values("from");
-    const unknown = rest.find(argument => argument.startsWith("-"));
-    if (unknown) throw new Error(`image: unexpected argument ${JSON.stringify(unknown)}. nek image --help`);
+
     const prompt = rest.join(" ").trim();
     if (!prompt) throw new Error("image needs a prompt. nekocli --help");
     if (Buffer.byteLength(prompt) > MAX_PROMPT_BYTES) {

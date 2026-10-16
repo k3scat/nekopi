@@ -41,6 +41,9 @@ Install Git and `rg` separately. To run from source:
 Use Bun **1.2.18** to install and build, Node **22.19+** to launch, and an
 installed `rg` for search. The development dependencies pin Pi **1.3.0**.
 
+Maintainers can run the pinned Pi directly with `sh scripts/pi-dev`. The checkout's
+`bin` directory does not replace an existing `pi` command.
+
 ```sh
 bun install --frozen-lockfile --ignore-scripts
 bun run build
@@ -90,6 +93,7 @@ permissions. Workspace path checks on specific commands do not change that.
 - [Tools](docs/tools.md) — commands, output and limits.
 - [Configuration](docs/configuration.md) — settings, logins and local data.
 - [Development](docs/development.md) — internals, checks and design decisions.
+- [CLI performance](docs/performance.md): profiling, measured results and remaining costs.
 - [Releases](docs/releases.md) — CI, versioning, npm publishing, and maintainer setup.
 
 `nek --help` is the command index. `nek image --help` has the longer image guide.
