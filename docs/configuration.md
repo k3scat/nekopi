@@ -44,6 +44,31 @@ diagnostic report. Bash edits are not observed. Diagnostics cover the changed
 file, not the project or tests, and may include pre-existing errors. A failed
 query does not undo the edit.
 
+## Personality
+
+`PERSONA.md` replaces the default opening identity, not the rest of the generated
+system prompt. It does not change tools, permissions, workflow rules, skills,
+`AGENTS.md` context, or `APPEND_SYSTEM.md` content. Character instructions can
+still affect model behavior, so keep the file consistent with your work rules.
+
+1. The global file is `<agent directory>/PERSONA.md`, normally
+   `~/.pi/agent/PERSONA.md`. `PI_CODING_AGENT_DIR` changes this location.
+2. In trusted projects, NekoPi searches from the working directory up to the
+   filesystem root. The nearest `PERSONA.md` replaces the global persona.
+3. Project personas are not read in untrusted projects. Revoking trust uses the
+   global persona on the next request. After granting trust, use `/reload`.
+4. An empty selected file keeps the default identity. An empty project file
+   therefore disables a global persona for that project.
+5. `SYSTEM.md`, `--system-prompt`, and custom system prompts from extensions take
+   priority. Persona files are not read for these prompt replacements.
+
+Files must be regular UTF-8 files of at most 64 KiB. Invalid active files produce
+an error and stop the request before it reaches the model. Persona contents are
+loaded on the first request or prompt inspection and kept until `/reload`.
+Reload after editing, creating, or deleting a file. There is no file watcher,
+additional CLI command, or JSON setting. `/nekopi prompt` shows the persona in
+the existing prompt viewer; edits in that viewer are still discarded.
+
 ## Web and image logins
 
 **Web follows the selected coding model.** OpenAI API keys and direct-use

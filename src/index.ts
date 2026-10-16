@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getAgentDir, getPackageDir, type ExtensionAPI, type ExtensionContext, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, getPackageDir, type BeforeAgentStartEvent, type ExtensionAPI, type ExtensionContext, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { loadConfig, type LoadedConfig } from "./config.ts";
 import { createTelemetry, type Telemetry } from "./telemetry.ts";
 import { createSourceTools } from "./source-tools.ts";
@@ -17,12 +17,16 @@ import { readPreviewFeedback } from "./tools/bash/read-preview.ts";
 import { exposeOnPath, launcher } from "./tools/launcher.ts";
 import { COMPLETION_GUIDELINES, IMAGE_GUIDANCE, NEKOCLI_GUIDANCE, PI_ENVIRONMENT_RULE, WEB_GUIDANCE, piDocsSection } from "./prompt.ts";
 import { renderStats } from "./stats.ts";
+import { loadPersonas, personaMessages, previewPersona, type Personas } from "./persona.ts";
 
 const ANOMALOUS_NATIVE_BASH_TIMEOUT_SECONDS = 1_000;
 const RECOVERY_NATIVE_BASH_TIMEOUT_SECONDS = 300;
 
 interface SessionState {
   loaded: LoadedConfig;
+  personas?: Promise<Personas>;
+  promptOptions?: BeforeAgentStartEvent["systemPromptOptions"];
+  preamble?: string;
   telemetry: Telemetry;
   toolStarts: Map<string, number>;
   configuredTools: string[];
@@ -55,6 +59,12 @@ export function createNekopiExtension(options: { agentDir?: string;
     function isNativeBash(): boolean {
       const tool = pi.getAllTools().find(tool => tool.name === "bash");
       return tool?.sourceInfo.source === "builtin" && tool.sourceInfo.path === "builtin:bash";
+    }
+
+    async function personaFor(current: SessionState, ctx: ExtensionContext): Promise<string | undefined> {
+      current.personas ??= loadPersonas({ cwd: ctx.cwd, agentDir, trustedProject: ctx.isProjectTrusted() });
+      const personas = await current.personas;
+      return ctx.isProjectTrusted() ? personas.project ?? personas.global : personas.global;
     }
 
     function initialize(ctx: ExtensionContext): Promise<SessionState> {
@@ -213,8 +223,10 @@ export function createNekopiExtension(options: { agentDir?: string;
 
     pi.on("before_agent_start", event => {
       const prompt = event.systemPromptOptions;
+      if (state) state.promptOptions = prompt;
       // Custom system prompts belong to the host.
       if (prompt.customPrompt || prompt.forceSystemPrompt !== undefined) return;
+      if (state) state.preamble = event.systemPrompt.split("\n\n<", 1)[0];
       // Keep Pi-specific help out of ordinary coding context.
       prompt.sections.docs ??= piDocsSection(getPackageDir());
       if (state?.shell) {
@@ -231,6 +243,22 @@ export function createNekopiExtension(options: { agentDir?: string;
       for (const rule of COMPLETION_GUIDELINES) {
         if (!prompt.promptGuidelines.includes(rule)) prompt.promptGuidelines.push(rule);
       }
+    });
+
+    pi.on("context_with_system", async (event, ctx) => {
+      const current = state;
+      const prompt = current?.promptOptions;
+      // Check after all start handlers, including later host prompt replacements.
+      if (!current || !prompt || !current.preamble || prompt.customPrompt || prompt.forceSystemPrompt !== undefined) return;
+      let persona: string | undefined;
+      try {
+        persona = await personaFor(current, ctx);
+      } catch (error) {
+        ctx.abort();
+        throw error;
+      }
+      if (state !== current || !persona) return;
+      return { messages: personaMessages(event.messages, persona, current.preamble) };
     });
 
     pi.on("tool_call", event => {
@@ -301,7 +329,15 @@ export function createNekopiExtension(options: { agentDir?: string;
           return;
         }
         const current = await initialize(ctx);
-        const text = command === "prompt" ? ctx.getSystemPrompt()
+        let persona: string | undefined;
+        if (command === "prompt") {
+          const prompt = ctx.getSystemPromptOptions();
+          if (!prompt.customPrompt && prompt.forceSystemPrompt === undefined
+            && !current.promptOptions?.customPrompt && current.promptOptions?.forceSystemPrompt === undefined) {
+            persona = await personaFor(current, ctx);
+          }
+        }
+        const text = command === "prompt" ? previewPersona(ctx.getSystemPrompt(), persona)
           : command === "lsp" ? renderDoctor(ctx.cwd, await lspDoctor(ctx.cwd, current.loaded.config.languageServers.servers), await installerPath())
           : command === "stats" ? renderStats(current.telemetry.snapshot())
           : JSON.stringify(current.loaded, null, 2);

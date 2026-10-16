@@ -36,6 +36,7 @@ See [Releases](releases.md) for commit conventions and publishing setup.
 | [src/index.ts](../src/index.ts) | Lifecycle, tool selection, prompt sections, session commands |
 | [src/branding.ts](../src/branding.ts) | Standalone TUI header through Pi's public UI API |
 | [src/config.ts](../src/config.ts) | Strict NekoPi settings, trust and value origins |
+| [src/persona.ts](../src/persona.ts) | Bounded `PERSONA.md` discovery and request preamble replacement |
 | [src/nekocli.ts](../src/nekocli.ts), [commands.ts](../src/tools/commands.ts) | CLI dispatch and declared command surface |
 | [patch.ts](../src/tools/patch.ts), [patch/](../src/tools/patch/) | Diff/envelope parsing, hunk placement and Git application |
 | [search.ts](../src/tools/search.ts), [find.ts](../src/tools/find.ts) | ripgrep scans, ignore rules and bounded results |
