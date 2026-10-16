@@ -1,0 +1,23 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.env
+.env.*
+.npmrc
+.pi/
+
+# Tool caches and `npm pack` output.
+.pytest_cache/
+.ruff_cache/
+*.tgz
+
+# Session working directories, ignored so a recreated one stays out of the way.
+.nekopi/
+.tools/
+
+# The benchmark harness is local. It carries host names, cached task archives
+# and a reserved task panel that is worth nothing once published.
+bench/
+tests/bench/
+tests/test_*.py

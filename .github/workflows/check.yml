@@ -1,0 +1,85 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor is what `engines.node` promises; the ceiling is what CI used
+        # to test alone. Both run, so the promise is not an untested claim.
+        node: ["22.19.0", "24.15.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.2.18
+      - name: Ensure ripgrep is installed
+        run: command -v rg || (sudo apt-get update && sudo apt-get install --yes ripgrep)
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Lint, build, test, and smoke check
+        run: bun run check
+      - run: node bin/nekopi.mjs --version
+      - run: node bin/nekopi.mjs doctor
+
+  # The peer range accepts any Pi 1.x, so something has to exercise the range
+  # rather than only the pinned version. A break here is Pi's newest release
+  # meeting this extension, which is a warning worth having before a user does.
+  latest-pi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.15.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.2.18
+      - name: Ensure ripgrep is installed
+        run: command -v rg || (sudo apt-get update && sudo apt-get install --yes ripgrep)
+      - run: bun install --ignore-scripts
+      - run: bun add -d @earendil-works/pi-ai@latest @earendil-works/pi-coding-agent@latest
+      - run: bun run check
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.15.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.2.18
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Publish package, tags, and GitHub release
+        run: bun run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

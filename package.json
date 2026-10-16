@@ -1,0 +1,93 @@
+{
+  "name": "nekopi",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "A minimal Pi flavor: one bash tool, source operations through nek.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/k3scat/nekopi.git"
+  },
+  "bugs": "https://github.com/k3scat/nekopi/issues",
+  "homepage": "https://github.com/k3scat/nekopi#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "packageManager": "bun@1.2.18",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "nekopi": "bin/nekopi.mjs",
+    "nekocli": "bin/nekocli.mjs"
+  },
+  "files": [
+    "bin/nek",
+    "bin/nekocli",
+    "bin/nekocli.mjs",
+    "bin/nekopi.mjs",
+    "dist",
+    "src",
+    "docs",
+    "scripts/install-servers.sh",
+    "README.md"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "coding-agent",
+    "lsp",
+    "tree-sitter"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "prepare": "bun scripts/build.ts",
+    "dev": "bun src/cli.ts",
+    "start": "node bin/nekopi.mjs",
+    "build": "bun scripts/build.ts",
+    "lint": "oxlint --deny-warnings src tests scripts bin release.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit && bun test",
+    "check": "bun run lint && bun run build && bun run test && bun run smoke",
+    "smoke": "bun scripts/smoke.mjs",
+    "budget": "bun scripts/budget.ts",
+    "release": "semantic-release"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "^1.3.0",
+    "@earendil-works/pi-coding-agent": "^1.3.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/github": "12.0.10",
+    "@semantic-release/npm": "13.2.0",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "@types/bun": "1.2.18",
+    "@types/node": "24.10.1",
+    "gpt-tokenizer": "4.0.0",
+    "oxlint": "1.88.0",
+    "semantic-release": "25.0.9",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@vscode/tree-sitter-wasm": "0.3.1",
+    "diff": "8.0.4",
+    "typebox": "1.3.27",
+    "vscode-jsonrpc": "9.0.3",
+    "vscode-languageserver-protocol": "3.18.4",
+    "web-tree-sitter": "0.25.10"
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "languageServers": { "enabled": true },
+  "telemetry": { "enabled": true }
+}

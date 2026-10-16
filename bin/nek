@@ -1,0 +1,12 @@
+#!/bin/sh
+nekopi_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 1
+case "${NEKOPI_CLI_RUNTIME:-auto}" in
+  bun) exec bun "$nekopi_root/bin/nekocli.mjs" "$@" ;;
+  auto)
+    if command -v bun >/dev/null 2>&1 && [ "$(bun --version)" = 1.2.18 ]; then
+      exec bun "$nekopi_root/bin/nekocli.mjs" "$@"
+    fi ;;
+  node) ;;
+  *) printf '%s\n' 'nek: NEKOPI_CLI_RUNTIME must be auto, bun, or node' >&2; exit 2 ;;
+esac
+exec "${NEKOPI_NODE:-node}" "$nekopi_root/bin/nekocli.mjs" "$@"

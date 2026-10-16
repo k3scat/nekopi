@@ -1,0 +1,5 @@
+# Bare `bun test` would otherwise walk the whole repository and pick up the
+# benchmark fixtures, whose tests are meant to fail until an agent fixes them.
+# A failing suite that is supposed to fail teaches nothing.
+[test]
+root = "tests"
