@@ -7,12 +7,11 @@ import { askMarker, MAX_ASK_BYTES } from "./tools/bash/ask-bridge.ts";
 import { MAX_QUERY_BYTES } from "./tools/web.ts";
 import { IMAGE_HELP, MAX_INPUTS, MAX_PROMPT_BYTES } from "./tools/image.ts";
 import { applyPatch } from "./tools/patch.ts";
-import { createEditRecoveryTool } from "./tools/edit.ts";
-import { createFindTool } from "./tools/find.ts";
-import { createReadBufferTool, readSelection } from "./tools/read.ts";
-import { createSearchTool, SEARCH_PATH_LIMIT } from "./tools/search.ts";
+import { findFiles } from "./tools/find/core.ts";
+import { search, SEARCH_PATH_LIMIT } from "./tools/search/core.ts";
 import { declarationsOf, describeDeclarations } from "./tools/read/declarations.ts";
-import { cliRangeLimits, cliReadText } from "./tools/read/cli-output.ts";
+import { cliRangeLimits } from "./tools/read/cli-budget.ts";
+import { cliText as cliReadText, readSmallText, readTextSelection } from "./tools/read/cli-text.ts";
 import { imageReadMarker } from "./tools/bash/image-bridge.ts";
 import { inside, resolveInside } from "./tools/workspace-path.ts";
 
@@ -112,8 +111,7 @@ async function nearestPaths(cwd: string, path: string): Promise<string[]> {
   const name = path.split("/").filter(Boolean).pop();
   if (!name) return [];
   try {
-    const found = textOf(await createFindTool(cwd).execute("nekocli",
-      { pattern: name, limit: 4 } as never, AbortSignal.timeout(REDIRECT_MS), () => {}, { cwd } as never));
+    const found = textOf(await findFiles(cwd, { pattern: name, limit: 4 }, {}, AbortSignal.timeout(REDIRECT_MS)));
     return found.split("\n").map(line => line.trim()).filter(line => line && !line.startsWith("No "));
   } catch { return []; }
 }
@@ -167,8 +165,7 @@ async function dispatch(argv: string[], cwd: string,
     if (absent.length && !existing.length) throw new Error(missing);
     // Reserve space for the incomplete-scope notice without relaxing the
     // search tool's 50 KiB output cap.
-    const tool = createSearchTool(cwd, absent.length ? { maxOutputBytes: 49 * 1024 } : {});
-    const result = await tool.execute("nekocli", {
+    const result = await search(cwd, {
       pattern,
       ...(existing.length ? { path: existing.length === 1 ? existing[0] : existing } : {}),
       ...(globs.length ? { glob: globs.length === 1 ? globs[0]! : globs } : {}),
@@ -176,7 +173,7 @@ async function dispatch(argv: string[], cwd: string,
       ...(limit === undefined ? {} : { limit }),
       ...(files ? { outputMode: "files" as const } : {}), ...(ignoreCase ? { ignoreCase: true } : {}),
       ...(fixed ? { literal: true } : {}),
-    } as never, AbortSignal.timeout(TIMEOUT_MS), () => {}, { cwd } as never);
+    }, absent.length ? { maxOutputBytes: 49 * 1024 } : {}, AbortSignal.timeout(TIMEOUT_MS));
     let text = textOf(result).replace(
       /(^Incomplete: [^\n]*), or use outputMode: files\.$/mu,
       "$1, or use --files.");
@@ -203,9 +200,9 @@ async function dispatch(argv: string[], cwd: string,
       throw new Error(`no such path: ${gone[0]}.`
         + (near.length ? ` Did you mean ${near.slice(0, 4).join(", ")}?` : ""));
     }
-    const result = await createFindTool(cwd).execute("nekocli",
-      { pattern, ...(path ? { path } : {}), ...(limit === undefined ? {} : { limit }) } as never,
-      AbortSignal.timeout(TIMEOUT_MS), () => {}, { cwd } as never);
+    const result = await findFiles(cwd,
+      { pattern, ...(path ? { path } : {}), ...(limit === undefined ? {} : { limit }) },
+      {}, AbortSignal.timeout(TIMEOUT_MS));
     return result.isError ? { text: textOf(result), failed: true } : { text: textOf(result) };
   }
 
@@ -223,20 +220,32 @@ async function dispatch(argv: string[], cwd: string,
         ...(found.failed ? { failed: true } : {}) };
       const only = found.declared[0]!;
       const prefix = `${describeDeclarations(symbol, found)}\n\n`;
-      return { text: cliReadText(await readSelection(cwd, {}, cliRangeLimits(only.path, prefix))(
-        { path: only.path, symbol }, AbortSignal.timeout(TIMEOUT_MS), { cwd }), only.path, prefix) };
+      const input = { path: only.path, symbol };
+      const result = await readTextSelection(cwd, input, prefix)
+        ?? await (await import("./tools/read.ts")).readSelection(cwd, {}, cliRangeLimits(only.path, prefix))(
+          input, AbortSignal.timeout(TIMEOUT_MS), { cwd });
+      return { text: await cliReadText(result, only.path, prefix) };
     }
     if (!path) throw new Error("read needs a file, or --symbol with a name. nekocli --help");
     try {
       if (lines !== undefined || symbol !== undefined) {
-        return { text: cliReadText(await readSelection(cwd, {}, cliRangeLimits(path))({ path,
+        const input = { path,
           ...(symbol === undefined ? {} : { symbol }), ...(lines === undefined ? {} : { ranges: spans(lines) }),
-        }, AbortSignal.timeout(TIMEOUT_MS), { cwd }), path) };
+        };
+        const result = await readTextSelection(cwd, input)
+          ?? await (await import("./tools/read.ts")).readSelection(cwd, {}, cliRangeLimits(path))(
+            input, AbortSignal.timeout(TIMEOUT_MS), { cwd });
+        return { text: await cliReadText(result, path) };
       }
+      if (limit === undefined) {
+        const small = await readSmallText(cwd, path);
+        if (small) return { text: await cliReadText(small, path) };
+      }
+      const { createReadBufferTool } = await import("./tools/read.ts");
       const result = await createReadBufferTool(cwd).execute("nekocli",
         { path, lineNumbers: true, ...(limit === undefined ? {} : { limit }) } as never,
         AbortSignal.timeout(TIMEOUT_MS), () => {}, { cwd } as never);
-      const body = cliReadText(result, path);
+      const body = await cliReadText(result, path);
       const bridge = await imageReadMarker(result);
       return { text: [body, bridge.note, bridge.marker].filter(Boolean).join("\n") };
     } catch (error) {
@@ -280,6 +289,7 @@ async function dispatch(argv: string[], cwd: string,
       throw new Error("edit needs a workspace-relative path to a file inside the workspace");
     }
     const absolute = resolve(cwd, path);
+    const { createEditRecoveryTool } = await import("./tools/edit.ts");
     const tool = createEditRecoveryTool(cwd, {
       access(actual) {
         // Native edit expands @, ~ and Unicode spaces. Never validate one path

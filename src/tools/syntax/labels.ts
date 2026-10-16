@@ -15,7 +15,7 @@ export type SymbolIndex = Map<string, Symbol[]>;
  * contains it. Only matched files are parsed, so the cost follows the result
  * rather than the repository. Any failure drops the label and never the hit.
  */
-export async function indexSymbols(cwd: string, paths: readonly string[]): Promise<SymbolIndex> {
+export async function indexSymbols(cwd: string, paths: readonly string[], lines?: ReadonlyMap<string, readonly number[]>): Promise<SymbolIndex> {
   const index: SymbolIndex = new Map();
   const distinct = [...new Set(paths)].filter(path => languageFor(path)).slice(0, MAX_FILES);
   await Promise.all(distinct.map(async path => {
@@ -24,7 +24,7 @@ export async function indexSymbols(cwd: string, paths: readonly string[]): Promi
       const parsed = await parseSource(path, text);
       if (!isParsed(parsed)) return;
       try {
-        index.set(path, outlineOf(parsed.tree.rootNode, parsed.rules, {}).symbols);
+        index.set(path, outlineOf(parsed.tree.rootNode, parsed.rules, { lines: lines?.get(path) }).symbols);
       } finally {
         parsed.tree.delete();
       }

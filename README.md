@@ -90,6 +90,7 @@ permissions. Workspace path checks on specific commands do not change that.
 - [Tools](docs/tools.md) — commands, output and limits.
 - [Configuration](docs/configuration.md) — settings, logins and local data.
 - [Development](docs/development.md) — internals, checks and design decisions.
+- [CLI performance](docs/performance.md): profiling, measured results and remaining costs.
 - [Releases](docs/releases.md) — CI, versioning, npm publishing, and maintainer setup.
 
 `nek --help` is the command index. `nek image --help` has the longer image guide.

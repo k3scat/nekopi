@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { posix } from "node:path";
 import { promisify } from "node:util";
 
 test("the npm archive includes built launchers and excludes development and local data", async () => {
@@ -18,5 +20,13 @@ test("the npm archive includes built launchers and excludes development and loca
   expect(paths).not.toContain("release.config.mjs");
   for (const path of ["bin/nek", "bin/nekocli", "bin/nekopi.mjs", "bin/nekocli.mjs"]) {
     expect(archive!.files.find(file => file.path === path)!.mode & 0o111).not.toBe(0);
+  }
+  for (const path of paths.filter(path => path.startsWith("dist/") && path.endsWith(".js"))) {
+    const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+    for (const match of source.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)["'](\.\/[^"']+\.js)["']/gu)) {
+      expect(paths).toContain(posix.join(posix.dirname(path), match[1]!));
+    }
+    // Catch invalid split exports from the build tool before publishing.
+    await promisify(execFile)("node", ["--check", path], { cwd, timeout: 10_000 });
   }
 });

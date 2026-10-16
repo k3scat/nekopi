@@ -90,9 +90,9 @@ function labelledSymbol(symbols: readonly Symbol[], query: string, language: str
  * the right one. An ambiguous name returns every candidate range rather than
  * choosing one.
  */
-export async function symbolRanges(absolutePath: string, displayPath: string, query: string): Promise<SourceRange[]> {
+export async function symbolRanges(absolutePath: string, displayPath: string, query: string, source?: string): Promise<SourceRange[]> {
   if (!query.trim() || query.length > 256) throw new Error("symbol must be a nonblank name of at most 256 characters.");
-  const text = await readFile(absolutePath, "utf8");
+  const text = source ?? await readFile(absolutePath, "utf8");
   const parsed = await parseSource(displayPath, text);
   if (!isParsed(parsed)) throw new Error(`Cannot resolve a symbol in ${displayPath}: ${parsed.detail}`);
   let symbols: Symbol[];

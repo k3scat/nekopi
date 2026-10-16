@@ -13,15 +13,22 @@ async function runBuild(args: string[]): Promise<void> {
   const output = new URL("dist/", root);
   // dist contains generated files only. Remove obsolete entry points before building.
   await rm(output, { recursive: true, force: true });
-  const result = await Bun.build({
-    entrypoints: ["src/cli.ts", "src/index.ts", "src/nekocli.ts"].map(path => fileURLToPath(new URL(path, root))),
-    outdir: fileURLToPath(output),
-    target: "node",
-    packages: "external",
-    sourcemap: "external",
-  });
-  if (!result.success) throw new AggregateError(result.logs, "NekoPi build failed.");
-  console.log(`Built ${result.outputs.length} artifacts in dist/.`);
+  let artifacts = 0;
+  // Build the split CLI separately: Bun 1.2 duplicates exports when its lazy
+  // modules are also shared with the extension's static entry point.
+  for (const entries of [["src/cli.ts", "src/index.ts"], ["src/nekocli.ts"]]) {
+    const result = await Bun.build({
+      entrypoints: entries.map(path => fileURLToPath(new URL(path, root))),
+      outdir: fileURLToPath(output),
+      target: "node",
+      packages: "external",
+      splitting: entries.length === 1,
+      sourcemap: "external",
+    });
+    if (!result.success) throw new AggregateError(result.logs, "NekoPi build failed.");
+    artifacts += result.outputs.length;
+  }
+  console.log(`Built ${artifacts} artifacts in dist/.`);
 }
 
 if (import.meta.main) await runBuild(process.argv.slice(2));
