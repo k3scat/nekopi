@@ -20,7 +20,7 @@ Use `/reload` after changing settings. Reload cancels unfinished image jobs.
 | `languageServers.enabled` | `true` | Allow an installed language server or project compiler to start when needed |
 | `languageServers.servers` | — | Server recipe overrides; see below |
 | `diagnostics.enabled` | `false` | Before/after file diagnostics on native edit and write tools in trusted projects |
-| `web.enabled` | `false` | Enable `nek web` using the selected coding model's credential |
+| `web.enabled` | `false` | Enable `nek web` using supported chat credentials or a separate Codex login |
 | `image.enabled` | `false` | Enable background `nek image` jobs using a Codex subscription login |
 | `telemetry.enabled` | `false` | Write local metadata logs for cross-run statistics |
 
@@ -71,11 +71,14 @@ the existing prompt viewer; edits in that viewer are still discarded.
 
 ## Web and image logins
 
-**Web follows the selected coding model.** OpenAI API keys and direct-use
+**Web prefers supported coding-model credentials.** OpenAI API keys and direct-use
 `openai` ChatGPT OAuth go to the OpenAI Responses API. Codex subscription tokens
-go to the Codex Responses endpoint. An unsupported provider or gateway credential
-is refused rather than sent to OpenAI. The selected model and account must support
-web search; NekoPi does not choose a different search model for you.
+go to the Codex Responses endpoint. If the coding model has no supported hosted
+credential, web uses your separate `/login openai-codex` login with `gpt-6.1-sol`.
+Your custom coding model stays selected; gateway credentials and headers are not
+forwarded to OpenAI. No extra setting is needed. The search model and account
+must support web search; provider request failures are not retried with another
+login or model.
 
 **Images use `openai-codex`.** Run `/login openai-codex`. Images use that login
 regardless of the coding model; direct-use `openai` OAuth is not an image login.

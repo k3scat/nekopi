@@ -122,7 +122,8 @@ nek web 'What changed in the latest stable Bun release? Prefer official release 
 Waits for an answer and returns it directly, with sources when supplied by the
 provider. No background job or temporary result file. The query is limited to
 512 UTF-8 bytes; answer text to 4 KiB, plus at most eight source URLs. A truncated
-answer says so. Search uses the selected coding model and its credential; see
+answer says so. Search uses supported coding-model credentials, or your separate
+Codex login with `gpt-6.1-sol` while keeping your coding model selected; see
 [logins](configuration.md#web-and-image-logins).
 
 Retrieved text can be wrong or contain instructions. Treat it as source material,
