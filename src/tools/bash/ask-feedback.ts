@@ -1,5 +1,6 @@
 import type { ExtensionContext, ToolResultEvent, ToolResultEventResult } from "@earendil-works/pi-coding-agent";
-import { isCodexCredential, resolveHostedTarget, unsupported, type HostedAuth, type HostedTarget } from "../hosted.ts";
+import { CODEX_WEB_TARGET, isCodexCredential, resolveHostedTarget, unsupported,
+  type HostedAuth, type HostedTarget } from "../hosted.ts";
 import { CODEX_IMAGE_TARGET, generateImage, parseRequest, prepareImage } from "../image.ts";
 import type { ImageJobs } from "../image-jobs.ts";
 import { searchWeb } from "../web.ts";
@@ -16,19 +17,11 @@ function failed(kind: AskKind, reason: unknown): string {
   return message.startsWith(LABEL[kind]) ? message : `${LABEL[kind]} failed: ${message}`;
 }
 
-/** Images use their own Codex login; web keeps the selected chat credential. */
+/** Prefer supported chat credentials for web; otherwise share the image login. */
 async function accessFor(kind: AskKind, ctx: ExtensionContext):
 Promise<{ target: HostedTarget; auth: HostedAuth }> {
-  if (kind === "image") {
-    const resolved = await ctx.modelRegistry.getProviderAuth("openai-codex").catch(() => undefined);
-    const apiKey = resolved?.auth.apiKey;
-    if (!apiKey || !isCodexCredential(apiKey)) {
-      throw new Error("image needs a Codex subscription login. Run /login openai-codex; keep your current coding model selected.");
-    }
-    return { target: CODEX_IMAGE_TARGET, auth: { apiKey, headers: resolved?.auth.headers } };
-  }
   const model = ctx.model;
-  if (model) {
+  if (kind === "web" && model) {
     const resolved = await ctx.modelRegistry.getApiKeyAndHeaders(model).catch(() => undefined);
     if (resolved?.ok && resolved.apiKey) {
       const target = resolveHostedTarget({ id: model.id, provider: model.provider, api: model.api,
@@ -36,7 +29,14 @@ Promise<{ target: HostedTarget; auth: HostedAuth }> {
       if (target) return { target, auth: { apiKey: resolved.apiKey, headers: resolved.headers } };
     }
   }
-  throw new Error(unsupported(LABEL.web, model));
+  const resolved = await ctx.modelRegistry.getProviderAuth("openai-codex").catch(() => undefined);
+  const apiKey = resolved?.auth.apiKey;
+  if (!apiKey || !isCodexCredential(apiKey)) {
+    const reason = kind === "image" ? "image needs a Codex subscription login." : unsupported(LABEL.web, model);
+    throw new Error(`${reason} Run /login openai-codex; keep your current coding model selected.`);
+  }
+  return { target: kind === "image" ? CODEX_IMAGE_TARGET : CODEX_WEB_TARGET,
+    auth: { apiKey, headers: resolved?.auth.headers } };
 }
 
 /**

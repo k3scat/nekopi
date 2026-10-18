@@ -23,6 +23,11 @@ export interface HostedTarget {
   model: string;
 }
 
+/** Search fallback for coding models without a supported hosted endpoint. */
+export const CODEX_WEB_TARGET: HostedTarget = {
+  url: CODEX_RESPONSES_URL, codex: true, model: "gpt-6.1-sol",
+};
+
 function jwtPayload(token: string): Record<string, unknown> | undefined {
   const parts = token.split(".");
   if (parts.length !== 3 || !parts[1]) return undefined;

@@ -3,9 +3,11 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { activateAskBridge, askBridgeActive, askMarker, deactivateAskBridge } from "../src/tools/bash/ask-bridge.ts";
 import { askFeedback } from "../src/tools/bash/ask-feedback.ts";
 import { ImageJobs, describeImageJob } from "../src/tools/image-jobs.ts";
+import { createSdkFixture } from "./helpers/model-server.ts";
 
 const SESSION = "hosted-test";
 const jwt = (claims: Record<string, unknown>) => `x.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.y`;
@@ -47,15 +49,17 @@ function event(kinds: Array<"web" | "image">, image?: Record<string, unknown>): 
     structuredContent: { output, exit_code: 0 } } as ToolResultEvent;
 }
 
-function context(cwd: string, codex: string | undefined = CODEX) {
+function context(cwd: string, codex: string | undefined = CODEX, provider = "openai") {
   const providers: string[] = [];
   const models: unknown[] = [];
-  const model = { id: "current-chat-model", provider: "openai", api: "openai-responses",
-    baseUrl: "https://api.openai.com/v1" } as NonNullable<ExtensionContext["model"]>;
+  const model = { id: "current-chat-model", provider, api: "openai-responses",
+    baseUrl: provider === "openai" ? "https://api.openai.com/v1" : "https://gateway.example/v1",
+  } as NonNullable<ExtensionContext["model"]>;
   const ctx = { cwd, model, sessionManager: { getSessionId: () => SESSION }, modelRegistry: {
     async getApiKeyAndHeaders(selected: unknown) {
       models.push(selected);
-      return { ok: true, apiKey: DIRECT };
+      return { ok: true, apiKey: provider === "openai" ? DIRECT : "gateway-secret",
+        headers: provider === "openai" ? undefined : { "X-Gateway-Secret": "private" } };
     },
     async getProviderAuth(provider: string) {
       providers.push(provider);
@@ -229,6 +233,154 @@ test("Codex web uses the selected Codex login without requiring an openai login"
   expect(String((result!.structuredContent as { output: string }).output)).toContain("Codex web answer.");
   expect(ctx.model).toBe(selected);
   expect(providers).toEqual([]);
+});
+
+test("custom chat models reuse the Codex login for web without forwarding gateway credentials", async () => {
+  const { ctx, model, models, providers } = context(tmpdir(), CODEX, "custom");
+  let requests = 0;
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    requests++;
+    expect(url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe(`Bearer ${CODEX}`);
+    expect(headers.get("chatgpt-account-id")).toBe("codex-account");
+    expect(headers.get("x-test")).toBe("preserved");
+    expect(headers.has("x-gateway-secret")).toBe(false);
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: "gpt-6.1-sol", tools: [{ type: "web_search" }], tool_choice: "required",
+    });
+    return new Response(`data: ${JSON.stringify({ type: "response.completed", response: { output: [
+      { type: "web_search_call", action: { sources: [{ url: "https://example.com/release" }] } },
+      { type: "message", content: [{ text: "Codex fallback answer." }] },
+    ] } })}\n`);
+  }) as never;
+  const ask = event(["web", "web"]);
+  ask.isError = true;
+  ask.structuredContent = { ...(ask.structuredContent as { output: string }), exit_code: 7 };
+  const seen = new Set<string>();
+  const jobs = background();
+  const result = await askFeedback(ask, ctx, { web: true, image: false }, seen, jobs.images);
+  const output = String((result!.structuredContent as { output: string }).output);
+  expect(output).toContain("Codex fallback answer.");
+  expect(output).toContain("https://example.com/release");
+  for (const secret of [CODEX, DIRECT, "gateway-secret", "private"]) expect(output).not.toContain(secret);
+  expect(result?.isError).toBe(true);
+  expect(result?.structuredContent).toMatchObject({ exit_code: 7 });
+  expect(ctx.model).toBe(model);
+  expect(models).toEqual([model]);
+  expect(providers).toEqual(["openai-codex"]);
+  expect(requests).toBe(2);
+  expect(await askFeedback(ask, ctx, { web: true, image: false }, seen, jobs.images)).toBeUndefined();
+  expect(requests).toBe(2);
+});
+
+for (const exitCode of [0, 7]) {
+  test(`real SDK custom chat receives Codex web results while preserving Bash exit ${exitCode} and chaining`, async () => {
+    let observed: ToolResultEvent | undefined;
+    const fixture = await createSdkFixture({ globalConfig: { web: { enabled: true } }, extensions: [pi => {
+      pi.on("tool_result", event => { observed = event; });
+      pi.on("session_start", (_event, ctx) => {
+        ctx.modelRegistry.getProviderAuth = async provider => {
+          expect(provider).toBe("openai-codex");
+          return { auth: { apiKey: CODEX } };
+        };
+      });
+    }] });
+    try {
+      const selected = fixture.session.model;
+      if (!selected) throw new Error("Missing custom chat model");
+      let requests = 0;
+      globalThis.fetch = (async (url: string, init: RequestInit) => {
+        requests++;
+        expect(url).toBe("https://chatgpt.com/backend-api/codex/responses");
+        expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${CODEX}`);
+        expect(JSON.parse(String(init.body)).model).toBe("gpt-6.1-sol");
+        return new Response(`data: ${JSON.stringify({ type: "response.completed", response: { output: [
+          { type: "web_search_call" }, { type: "message", content: [{ text: "Hosted search result." }] },
+        ] } })}\n`);
+      }) as never;
+      fixture.setResponses([
+        fauxAssistantMessage(fauxToolCall("bash", {
+          command: `nek web 'latest release' && printf 'CHAIN_RAN\\n'; exit ${exitCode}`,
+        }), { stopReason: "toolUse" }),
+        context => {
+          const result = context.messages.find(message => message.role === "toolResult");
+          expect(result?.role === "toolResult" && result.isError).toBe(exitCode !== 0);
+          expect(JSON.stringify(result)).toContain("Hosted search result.");
+          expect(JSON.stringify(result)).toContain("CHAIN_RAN");
+          expect(JSON.stringify(context.messages)).not.toContain(CODEX);
+          return fauxAssistantMessage("Used the search without switching models.");
+        },
+      ]);
+      await fixture.session.prompt("Search the web and continue.");
+      expect(fixture.session.model).toBe(selected);
+      expect(observed?.structuredContent).toMatchObject({ exit_code: exitCode });
+      expect(requests).toBe(1);
+      expect(fixture.requests).toHaveLength(2);
+      expect(fixture.errors).toEqual([]);
+    } finally { await fixture.cleanup(); }
+  });
+}
+
+test("web fallback gives login guidance for missing, wrong or failed Codex auth without leaking errors", async () => {
+  for (const token of ["", DIRECT, "sk-api-key", "refresh-error"]) {
+    const { ctx } = context(tmpdir(), token, "custom");
+    if (token === "refresh-error") ctx.modelRegistry.getProviderAuth = async () => {
+      throw new Error(`refresh failed: ${CODEX}`);
+    };
+    let requests = 0;
+    globalThis.fetch = (() => { requests++; throw new Error("must not send a request"); }) as never;
+    const result = await askFeedback(event(["web"]), ctx, { web: true, image: false }, new Set(), background().images);
+    const output = String((result!.structuredContent as { output: string }).output);
+    expect(result?.isError).toBe(true);
+    expect(result?.structuredContent).toMatchObject({ exit_code: 0 });
+    expect(output).toContain("/login openai-codex");
+    for (const secret of [CODEX, DIRECT, "sk-api-key", "gateway-secret", "refresh failed"]) expect(output).not.toContain(secret);
+    expect(requests).toBe(0);
+  }
+});
+
+test("disabled web resolves no credentials; missing chat auth can still use Codex", async () => {
+  for (const missing of ["model", "auth"] as const) {
+    const { ctx, providers, models } = context(tmpdir());
+    if (missing === "model") ctx.model = undefined;
+    else ctx.modelRegistry.getApiKeyAndHeaders = async () => { throw new Error(`chat auth failed: ${DIRECT}`); };
+    const ask = event(["web"]);
+    const jobs = background();
+    expect(await askFeedback(ask, ctx, { web: false, image: true }, new Set(), jobs.images)).toBeUndefined();
+    expect(providers).toEqual([]);
+    expect(models).toEqual([]);
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests++;
+      return new Response(`data: ${JSON.stringify({ type: "response.completed", response: { output: [
+        { type: "web_search_call" }, { type: "message", content: [{ text: "Independent search." }] },
+      ] } })}\n`);
+    }) as never;
+    const result = await askFeedback(ask, ctx, { web: true, image: false }, new Set(), jobs.images);
+    expect(result?.isError).toBe(false);
+    expect(String((result!.structuredContent as { output: string }).output)).toContain("Independent search.");
+    expect(providers).toEqual(["openai-codex"]);
+    expect(requests).toBe(1);
+  }
+});
+
+test("web provider failures are not retried with another login or model", async () => {
+  for (const provider of ["openai", "custom"]) {
+    const { ctx, providers } = context(tmpdir(), CODEX, provider);
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests++;
+      return new Response(JSON.stringify({ error: { message: CODEX } }), { status: 429 });
+    }) as never;
+    const result = await askFeedback(event(["web"]), ctx, { web: true, image: false }, new Set(), background().images);
+    const output = String((result!.structuredContent as { output: string }).output);
+    expect(result?.isError).toBe(true);
+    expect(output).toContain("web search failed: provider returned 429");
+    expect(output).not.toContain(CODEX);
+    expect(requests).toBe(1);
+    expect(providers).toEqual(provider === "openai" ? [] : ["openai-codex"]);
+  }
 });
 
 test("missing or wrong Codex auth gives login guidance without a paid or chat-credential fallback", async () => {
