@@ -7,7 +7,12 @@ import { searchWeb } from "../web.ts";
 import { asksIn, substitute, type AskKind } from "./ask-bridge.ts";
 
 /** Which enabled settings this session answers for. */
-export interface AskTools { web: boolean; image: boolean }
+export interface AskTools {
+  web: boolean;
+  image: boolean;
+  webTimeoutSeconds?: number;
+  imageTimeoutSeconds?: number;
+}
 
 const LABEL: Record<AskKind, string> = { web: "web search", image: "image" };
 
@@ -77,13 +82,14 @@ export async function askFeedback(event: ToolResultEvent, ctx: ExtensionContext,
         const text = images.start(request, ctx.cwd, async signal => {
           const { target, auth } = await (access.image ??= accessFor("image", ctx));
           signal.throwIfAborted();
-          try { return await generateImage(request, ctx.cwd, target, auth, signal); }
+          try { return await generateImage(request, ctx.cwd, target, auth, signal, enabled.imageTimeoutSeconds); }
           catch (error) { throw new Error(failed("image", error)); }
         });
         return { marker: ask.marker, text, failed: false };
       }
       const { target, auth } = await (access.web ??= accessFor("web", ctx));
-      return { marker: ask.marker, text: await searchWeb(ask.query, target, auth), failed: false };
+      return { marker: ask.marker,
+        text: await searchWeb(ask.query, target, auth, undefined, enabled.webTimeoutSeconds), failed: false };
     } catch (error) { return { marker: ask.marker, text: failed(ask.kind, error), failed: true }; }
   }));
   for (const { marker, text } of done) answers.set(marker, text);

@@ -1,5 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { DEFAULT_HOSTED_TIMEOUT_SECONDS } from "./tools/hosted.ts";
+
+const MAX_TIMEOUT_SECONDS = Math.floor(2_147_483_647 / 1000);
 
 /** A per-language server override, for a binary or options nekopi cannot guess. */
 interface ServerOverride {
@@ -15,8 +18,8 @@ interface NekopiConfig {
   languageServers: { enabled: boolean; servers?: Record<string, ServerOverride> };
   nekocli: { enabled: boolean };
   diagnostics: { enabled: boolean };
-  web: { enabled: boolean };
-  image: { enabled: boolean };
+  web: { enabled: boolean; timeoutSeconds: number };
+  image: { enabled: boolean; timeoutSeconds: number };
   telemetry: { enabled: boolean };
 }
 
@@ -27,8 +30,8 @@ const DEFAULT_CONFIG: Readonly<NekopiConfig> = {
   nekocli: { enabled: true },
   diagnostics: { enabled: false },
   // Hosted tools are opt-in because they make additional provider requests.
-  web: { enabled: false },
-  image: { enabled: false },
+  web: { enabled: false, timeoutSeconds: DEFAULT_HOSTED_TIMEOUT_SECONDS.web },
+  image: { enabled: false, timeoutSeconds: DEFAULT_HOSTED_TIMEOUT_SECONDS.image },
   telemetry: { enabled: false },
 };
 
@@ -106,6 +109,13 @@ function validateConfig(value: unknown, source: string): ConfigPatch {
         continue;
       }
       if (!Object.hasOwn(defaults, key)) throw new Error(`${source}: unknown setting '${section}.${key}'.`);
+      if ((section === "web" || section === "image") && key === "timeoutSeconds") {
+        if (typeof field !== "number" || !Number.isInteger(field) || field < 1 || field > MAX_TIMEOUT_SECONDS) {
+          throw new Error(`${source}: '${section}.${key}' must be an integer from 1 to ${MAX_TIMEOUT_SECONDS} seconds.`);
+        }
+        validated[key] = field;
+        continue;
+      }
       // Every remaining setting is a boolean switch.
       if (typeof field !== "boolean") throw new Error(`${source}: '${section}.${key}' must be boolean.`);
       validated[key] = field;

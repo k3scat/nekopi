@@ -21,17 +21,27 @@ Use `/reload` after changing settings. Reload cancels unfinished image jobs.
 | `languageServers.servers` | — | Server recipe overrides; see below |
 | `diagnostics.enabled` | `false` | Before/after file diagnostics on native edit and write tools in trusted projects |
 | `web.enabled` | `false` | Enable `nek web` using supported chat credentials or a separate Codex login |
+| `web.timeoutSeconds` | `300` | Total HTTP request limit for each web search, in seconds |
 | `image.enabled` | `false` | Enable background `nek image` jobs using a Codex subscription login |
+| `image.timeoutSeconds` | `180` | Total HTTP request limit for each image generation or edit, in seconds |
 | `telemetry.enabled` | `false` | Write local metadata logs for cross-run statistics |
 
 Missing values keep their defaults. For example:
 
 ```json
 {
-  "web": { "enabled": true },
-  "image": { "enabled": true }
+  "web": { "enabled": true, "timeoutSeconds": 300 },
+  "image": { "enabled": true, "timeoutSeconds": 600 }
 }
 ```
+
+Both timeout settings accept integers from 1 to 2147483 seconds (the runtime timer
+limit). They start when the HTTP request begins, after credential resolution and
+local preparation, and include reading the full response body. Incoming stream
+data does not reset them. Bash's `timeout` does not extend these limits. A timed-out
+image job becomes `failed`, remains queryable with `nek image --status ID`, and
+delivers a failure notification. Requests are not automatically retried. Raising
+a local limit cannot extend a provider or gateway deadline.
 
 `nekocli.enabled: false` keeps separate native source tools, with NekoPi's read
 and edit feedback. The same fallback is used when the `nek` launcher is missing.

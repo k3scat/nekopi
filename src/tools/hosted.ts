@@ -4,6 +4,8 @@ const OFFICIAL_BASE_URL = "https://api.openai.com/v1";
 /** The claim a ChatGPT subscription token carries and an API key does not. */
 const CODEX_CLAIM = "https://api.openai.com/auth";
 
+export const DEFAULT_HOSTED_TIMEOUT_SECONDS = { web: 300, image: 180 } as const;
+
 export interface HostedAuth {
   apiKey: string;
   headers?: Record<string, string | null>;
@@ -144,16 +146,22 @@ export function finalOutput(stream: string): { output: unknown[]; types: Set<str
 /** One hosted-tool request. Throws a one-line message the caller shows as-is. */
 export async function postHosted(label: string, target: HostedTarget, auth: HostedAuth,
   body: unknown, timeoutMs: number, signal?: AbortSignal, accept = "text/event-stream"): Promise<string> {
-  const deadline = signal
-    ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
-    : AbortSignal.timeout(timeoutMs);
-  const response = await fetch(target.url, {
-    method: "POST", headers: { ...headersFor(target, auth), Accept: accept }, body: JSON.stringify(body),
-    redirect: "error", signal: deadline,
-  });
-  // The body can echo the credential, so only the status is reported.
-  if (!response.ok) throw new Error(`${label} failed: provider returned ${response.status}.`);
-  return response.text();
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const deadline = signal ? AbortSignal.any([timeout, signal]) : timeout;
+  try {
+    const response = await fetch(target.url, {
+      method: "POST", headers: { ...headersFor(target, auth), Accept: accept }, body: JSON.stringify(body),
+      redirect: "error", signal: deadline,
+    });
+    // The body can echo the credential, so only the status is reported.
+    if (!response.ok) throw new Error(`${label} failed: provider returned ${response.status}.`);
+    return await response.text();
+  } catch (error) {
+    if (timeout.aborted && !signal?.aborted) {
+      throw new Error(`${label} failed: request timed out after ${timeoutMs / 1000} seconds (total HTTP request limit).`);
+    }
+    throw error;
+  }
 }
 
 /** Why a model cannot reach the hosted tools, in the one line the model sees. */

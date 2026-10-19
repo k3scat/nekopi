@@ -281,7 +281,9 @@ export function createNekopiExtension(options: { agentDir?: string;
       if (state !== current) return merged;
       if (current.askBridgeActive) {
         const answered = await askFeedback({ ...event, ...merged }, ctx,
-          { web: current.loaded.config.web.enabled, image: current.loaded.config.image.enabled },
+          { web: current.loaded.config.web.enabled, image: current.loaded.config.image.enabled,
+            webTimeoutSeconds: current.loaded.config.web.timeoutSeconds,
+            imageTimeoutSeconds: current.loaded.config.image.timeoutSeconds },
           current.askMarkers, current.imageJobs);
         if (answered) merged = { ...merged, ...answered };
       }
