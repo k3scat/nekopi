@@ -36,6 +36,39 @@ test("invalid untrusted project data is never parsed", async () => {
   await expect(loadConfig({ ...dirs, trustedProject: true })).rejects.toThrow("invalid JSON");
 });
 
+for (const [section, seconds] of [["web", 300], ["image", 180]] as const) {
+  test(`${section} timeout defaults and partial overrides follow project trust with origins`, async () => {
+    const dirs = await fixture();
+    const defaults = await loadConfig({ ...dirs, trustedProject: false });
+    expect(defaults.config[section]).toEqual({ enabled: false, timeoutSeconds: seconds });
+    expect(defaults.origins[`${section}.timeoutSeconds`]).toBe("default");
+    await writeFile(path.join(dirs.agentDir, "nekopi.json"),
+      JSON.stringify({ [section]: { enabled: true, timeoutSeconds: 600 } }));
+    await writeFile(path.join(dirs.cwd, ".pi/nekopi.json"),
+      JSON.stringify({ [section]: { timeoutSeconds: 900 } }));
+    const untrusted = await loadConfig({ ...dirs, trustedProject: false });
+    expect(untrusted.config[section]).toEqual({ enabled: true, timeoutSeconds: 600 });
+    expect(untrusted.origins[`${section}.timeoutSeconds`]).toBe("user");
+    const trusted = await loadConfig({ ...dirs, trustedProject: true });
+    expect(trusted.config[section]).toEqual({ enabled: true, timeoutSeconds: 900 });
+    expect(trusted.origins[`${section}.timeoutSeconds`]).toBe("project");
+    expect(trusted.origins[`${section}.enabled`]).toBe("user");
+  });
+
+  test(`${section} timeout rejects invalid values and accepts timer boundaries`, async () => {
+    const dirs = await fixture();
+    for (const timeoutSeconds of [0, -1, 0.5, "300", true, null, {}, [], 2147484, Infinity]) {
+      await writeFile(path.join(dirs.agentDir, "nekopi.json"), JSON.stringify({ [section]: { timeoutSeconds } }));
+      await expect(loadConfig({ ...dirs, trustedProject: true }))
+        .rejects.toThrow(`${section}.timeoutSeconds' must be an integer`);
+    }
+    for (const timeoutSeconds of [1, 2147483]) {
+      await writeFile(path.join(dirs.agentDir, "nekopi.json"), JSON.stringify({ [section]: { timeoutSeconds } }));
+      expect((await loadConfig({ ...dirs, trustedProject: true })).config[section].timeoutSeconds).toBe(timeoutSeconds);
+    }
+  });
+}
+
 test("rejects typos, invalid limits and prototype keys without coercion", async () => {
   const dirs = await fixture();
   for (const value of ['{"diagnostic":{}}', '{"__proto__":{}}', '{"diagnostics":{"enabled":"true"}}',

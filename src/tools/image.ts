@@ -1,10 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname } from "node:path";
-import { finalOutput, postHosted, type HostedAuth, type HostedTarget } from "./hosted.ts";
+import { DEFAULT_HOSTED_TIMEOUT_SECONDS, finalOutput, postHosted, type HostedAuth, type HostedTarget } from "./hosted.ts";
 import { resolveInside, resolveNewInside } from "./workspace-path.ts";
 
-/** Save provider PNGs in the workspace; return metadata, not an image attachment. */
-const TIMEOUT_MS = 180_000;
 export const CODEX_IMAGE_TARGET: HostedTarget = {
   url: "https://chatgpt.com/backend-api/codex/images/generations", codex: true, model: "gpt-image-2",
 };
@@ -150,9 +148,9 @@ export async function prepareImage(request: ImageRequest, cwd: string) {
   return { destination, inputs };
 }
 
-/** Generate one image, rechecking workspace paths after preflight and before writing. */
+/** Save one provider PNG, rechecking workspace paths after preflight and before writing. */
 export async function generateImage(request: ImageRequest, cwd: string, target: HostedTarget,
-  auth: HostedAuth, signal?: AbortSignal): Promise<string> {
+  auth: HostedAuth, signal?: AbortSignal, timeoutSeconds: number = DEFAULT_HOSTED_TIMEOUT_SECONDS.image): Promise<string> {
   signal?.throwIfAborted();
   const { destination, inputs } = await prepareImage(request, cwd);
   signal?.throwIfAborted();
@@ -162,7 +160,7 @@ export async function generateImage(request: ImageRequest, cwd: string, target: 
   }
   const endpoint = inputs.length ? { ...target, url: target.url.replace(/\/generations$/u, "/edits") } : target;
   const data = collectImage(await postHosted("image", endpoint, auth,
-    body(request, target, inputs), TIMEOUT_MS, signal, "application/json"));
+    body(request, target, inputs), timeoutSeconds * 1000, signal, "application/json"));
   signal?.throwIfAborted();
   if (!data) throw new Error("image failed: the provider returned no image.");
   const bytes = Buffer.from(data, "base64");

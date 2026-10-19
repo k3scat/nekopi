@@ -109,6 +109,45 @@ test("mixed web/image calls keep web on the chat login and resolve Codex separat
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
+test("real SDK passes trusted web and image timeout settings through the session bridge", async () => {
+  const f = await createSdkFixture({ trusted: true,
+    globalConfig: { web: { enabled: true, timeoutSeconds: 13 }, image: { enabled: true, timeoutSeconds: 17 } },
+    projectConfig: { web: { timeoutSeconds: 23 }, image: { timeoutSeconds: 29 } },
+    extensions: [pi => {
+      pi.on("session_start", (_event, ctx) => {
+        ctx.modelRegistry.getProviderAuth = async () => ({ auth: { apiKey: CODEX } });
+      });
+    }],
+  });
+  const timeout = spyOn(AbortSignal, "timeout");
+  try {
+    globalThis.fetch = (async (url: string) => new Response(url.includes("/images/")
+      ? JSON.stringify({ data: [{ b64_json: PIXEL }] })
+      : `data: ${JSON.stringify({ type: "response.completed", response: { output: [
+        { type: "web_search_call" }, { type: "message", content: [{ text: "Configured search result." }] },
+      ] } })}\n`)) as never;
+    f.setResponses([
+      fauxAssistantMessage(fauxToolCall("bash", {
+        command: "nek web 'release'; nek image 'cat' --out cat.png",
+      }), { stopReason: "toolUse" }),
+      fauxAssistantMessage("Received hosted results."),
+      fauxAssistantMessage("The image is ready."),
+    ]);
+    await f.session.prompt("Run the configured hosted tools.");
+    await until(() => f.session.messages.some(message => message.role === "custom"
+      && message.customType === "nekopi:image-job"));
+    expect(timeout).toHaveBeenCalledWith(23_000);
+    expect(timeout).toHaveBeenCalledWith(29_000);
+    expect(timeout).not.toHaveBeenCalledWith(13_000);
+    expect(timeout).not.toHaveBeenCalledWith(17_000);
+    const results = f.session.messages.filter(message => message.role === "toolResult");
+    expect(JSON.stringify(results)).toContain("Configured search result.");
+    expect(JSON.stringify(results)).toContain("Started image job");
+    expect(await readFile(join(f.cwd, "cat.png"))).toEqual(Buffer.from(PIXEL, "base64"));
+    expect(f.errors).toEqual([]);
+  } finally { await f.cleanup(); timeout.mockRestore(); }
+});
+
 test("invalid image paths and references fail before creating a job or resolving credentials", async () => {
   const parent = await mkdtemp(join(tmpdir(), "nekopi-ask-preflight-"));
   const cwd = join(parent, "workspace");

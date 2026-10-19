@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
@@ -19,9 +19,9 @@ async function until(check: () => boolean | Promise<boolean>): Promise<void> {
   throw new Error("Session did not receive the background result");
 }
 
-async function fixture() {
+async function fixture(timeoutSeconds = 180, abortable = false) {
   let observed: ToolResultEvent | undefined;
-  const result = await createSdkFixture({ globalConfig: { image: { enabled: true } }, extensions: [pi => {
+  const result = await createSdkFixture({ globalConfig: { image: { enabled: true, timeoutSeconds } }, extensions: [pi => {
     pi.on("tool_result", event => { observed = event; });
     pi.on("session_start", (_event, ctx) => {
       ctx.modelRegistry.getProviderAuth = async provider => {
@@ -35,8 +35,11 @@ async function fixture() {
   globalThis.fetch = (async (url: string, init: RequestInit) => {
     expect(url).toBe("https://chatgpt.com/backend-api/codex/images/generations");
     signal = init.signal as AbortSignal;
-    // Deliberately ignore cancellation to test the post-response write guard too.
-    return new Promise<Response>(resolve => { release = resolve; });
+    // Ignore cancellation by default to test the post-response write guard too.
+    return new Promise<Response>((resolve, reject) => {
+      release = resolve;
+      if (abortable) signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+    });
   }) as never;
   const command = `PI_SESSION_ID=${result.session.sessionManager.getSessionId()} nek image 'an orange cat' --out assets/cat.png`;
   const submit = fauxAssistantMessage(fauxToolCall("bash", { command }), { stopReason: "toolUse" });
@@ -127,6 +130,35 @@ test("real SDK wakes the idle agent on failure without exposing provider error b
     expect(await stat(join(f.cwd, "assets/cat.png")).catch(() => undefined)).toBeUndefined();
     expect(f.errors).toEqual([]);
   } finally { await f.cleanup(); }
+});
+
+test("real SDK delivers a configured image timeout once and retains failed status without writing", async () => {
+  const f = await fixture(2, true);
+  const realTimeout = AbortSignal.timeout;
+  const timeout = spyOn(AbortSignal, "timeout").mockImplementation(ms => realTimeout(ms === 2000 ? 30 : ms));
+  try {
+    f.setResponses([f.submit, fauxAssistantMessage("Continuing other work."), context => {
+      expect(JSON.stringify(context.messages)).toContain("image failed: request timed out after 2 seconds");
+      return fauxAssistantMessage("The image request timed out.");
+    }]);
+    await f.session.prompt("Generate an image.");
+    await until(() => f.requests.length === 3 && !f.session.isStreaming);
+    expect(timeout).toHaveBeenCalledWith(2000);
+    const jobs = f.session.messages.filter(message => message.role === "custom" && message.customType === "nekopi:image-job");
+    expect(jobs).toHaveLength(1);
+    const text = JSON.stringify(jobs[0]);
+    expect(text).toContain("failed");
+    const id = /image-[a-f0-9-]{36}/u.exec(text)![0];
+    f.setResponses([
+      fauxAssistantMessage(fauxToolCall("bash", { command: `nek image --status ${id}` }), { stopReason: "toolUse" }),
+      fauxAssistantMessage("The failed status is retained."),
+    ]);
+    await f.session.prompt("Check the image job status.");
+    const results = f.session.messages.filter(message => message.role === "toolResult");
+    expect(JSON.stringify(results.at(-1))).toContain("failed. image failed: request timed out after 2 seconds");
+    expect(await stat(join(f.cwd, "assets/cat.png")).catch(() => undefined)).toBeUndefined();
+    expect(f.errors).toEqual([]);
+  } finally { await f.cleanup(); timeout.mockRestore(); }
 });
 
 for (const reason of ["reload", "new", "quit"] as const) {

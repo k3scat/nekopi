@@ -1,7 +1,5 @@
-import { finalOutput, postHosted, type HostedAuth, type HostedTarget } from "./hosted.ts";
+import { DEFAULT_HOSTED_TIMEOUT_SECONDS, finalOutput, postHosted, type HostedAuth, type HostedTarget } from "./hosted.ts";
 
-/** Provider-hosted search, returned as a concise answer and source URLs. */
-const TIMEOUT_MS = 60_000;
 const MAX_ANSWER_BYTES = 4_096;
 const MAX_SOURCES = 8;
 export const MAX_QUERY_BYTES = 512;
@@ -87,10 +85,11 @@ export function render(query: string, found: Found): string {
   return lines.join("\n");
 }
 
+/** Provider-hosted search, returned as a concise answer and source URLs. */
 export async function searchWeb(query: string, target: HostedTarget, auth: HostedAuth,
-  signal?: AbortSignal): Promise<string> {
+  signal?: AbortSignal, timeoutSeconds: number = DEFAULT_HOSTED_TIMEOUT_SECONDS.web): Promise<string> {
   const found = collect(await postHosted("web search", target, auth, body(query, target),
-    TIMEOUT_MS, signal));
+    timeoutSeconds * 1000, signal));
   if (!found.searched && !found.answer) throw new Error("web search failed: the provider ran no search.");
   return render(query, found);
 }
